@@ -158,7 +158,7 @@ public final class PlatformDependent {
         } else {
             USE_DIRECT_BUFFER_NO_CLEANER = true;
             if (maxDirectMemory < 0) {
-                maxDirectMemory = maxDirectMemory0();
+                maxDirectMemory = MAX_DIRECT_MEMORY;
                 if (maxDirectMemory <= 0) {
                     DIRECT_MEMORY_COUNTER = null;
                 } else {
@@ -988,13 +988,24 @@ public final class PlatformDependent {
 
     private static long maxDirectMemory0() {
         long maxDirectMemory = 0;
+
         ClassLoader systemClassLoader = null;
         try {
-            // Try to get from sun.misc.VM.maxDirectMemory() which should be most accurate.
             systemClassLoader = getSystemClassLoader();
-            Class<?> vmClass = Class.forName("sun.misc.VM", true, systemClassLoader);
-            Method m = vmClass.getDeclaredMethod("maxDirectMemory");
-            maxDirectMemory = ((Number) m.invoke(null)).longValue();
+
+            // When using IBM J9 / Eclipse OpenJ9 we should not use VM.maxDirectMemory() as it not reflects the
+            // correct value.
+            // See:
+            //  - https://github.com/netty/netty/issues/7654
+            String vmName = SystemPropertyUtil.get("java.vm.name", "").toLowerCase();
+            if (!vmName.startsWith("ibm j9") &&
+                    // https://github.com/eclipse/openj9/blob/openj9-0.8.0/runtime/include/vendor_version.h#L53
+                    !vmName.startsWith("eclipse openj9")) {
+                // Try to get from sun.misc.VM.maxDirectMemory() which should be most accurate.
+                Class<?> vmClass = Class.forName("sun.misc.VM", true, systemClassLoader);
+                Method m = vmClass.getDeclaredMethod("maxDirectMemory");
+                maxDirectMemory = ((Number) m.invoke(null)).longValue();
+            }
         } catch (Throwable ignored) {
             // Ignore
         }

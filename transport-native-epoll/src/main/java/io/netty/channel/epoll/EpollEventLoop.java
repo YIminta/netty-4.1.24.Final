@@ -62,6 +62,8 @@ final class EpollEventLoop extends SingleThreadEventLoop {
     private final boolean allowGrowing;
     private final EpollEventArray events;
     private final IovArray iovArray = new IovArray();
+    private final NativeDatagramPacketArray datagramPacketArray = new NativeDatagramPacketArray();
+
     private final SelectStrategy selectStrategy;
     private final IntSupplier selectNowSupplier = new IntSupplier() {
         @Override
@@ -77,6 +79,9 @@ final class EpollEventLoop extends SingleThreadEventLoop {
     };
     private volatile int wakenUp;
     private volatile int ioRatio = 50;
+
+    // See http://man7.org/linux/man-pages/man2/timerfd_create.2.html.
+    private static final long MAX_SCHEDULED_TIMERFD_NS = 999999999;
 
     EpollEventLoop(EventLoopGroup parent, Executor executor, int maxEvents,
                    SelectStrategy strategy, RejectedExecutionHandler rejectedExecutionHandler) {
@@ -138,9 +143,17 @@ final class EpollEventLoop extends SingleThreadEventLoop {
     /**
      * Return a cleared {@link IovArray} that can be used for writes in this {@link EventLoop}.
      */
-    IovArray cleanArray() {
+    IovArray cleanIovArray() {
         iovArray.clear();
         return iovArray;
+    }
+
+    /**
+     * Return a cleared {@link NativeDatagramPacketArray} that can be used for writes in this {@link EventLoop}.
+     */
+    NativeDatagramPacketArray cleanDatagramPacketArray() {
+        datagramPacketArray.clear();
+        return datagramPacketArray;
     }
 
     @Override
@@ -233,7 +246,7 @@ final class EpollEventLoop extends SingleThreadEventLoop {
         long totalDelay = delayNanos(System.nanoTime());
         int delaySeconds = (int) min(totalDelay / 1000000000L, Integer.MAX_VALUE);
         return Native.epollWait(epollFd, events, timerFd, delaySeconds,
-                (int) min(totalDelay - delaySeconds * 1000000000L, Integer.MAX_VALUE));
+                (int) min(MAX_SCHEDULED_TIMERFD_NS, totalDelay - delaySeconds * 1000000000L));
     }
 
     private int epollWaitNow() throws IOException {
@@ -446,6 +459,7 @@ final class EpollEventLoop extends SingleThreadEventLoop {
         } finally {
             // release native memory
             iovArray.release();
+            datagramPacketArray.release();
             events.free();
         }
     }

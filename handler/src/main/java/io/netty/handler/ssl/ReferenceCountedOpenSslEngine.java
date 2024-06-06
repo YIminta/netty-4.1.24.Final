@@ -209,7 +209,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
 
     final boolean jdkCompatibilityMode;
     private final boolean clientMode;
-    private final ByteBufAllocator alloc;
+    final ByteBufAllocator alloc;
     private final OpenSslEngineMap engineMap;
     private final OpenSslApplicationProtocolNegotiator apn;
     private final OpenSslSession session;
@@ -607,8 +607,17 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
 
                 int bioLengthBefore = SSL.bioLengthByteBuffer(networkBIO);
 
-                // Explicit use outboundClosed as we want to drain any bytes that are still present.
+                // Explicitly use outboundClosed as we want to drain any bytes that are still present.
                 if (outboundClosed) {
+                    // If the outbound was closed we want to ensure we can produce the alert to the destination buffer.
+                    // This is true even if we not using jdkCompatibilityMode.
+                    //
+                    // We use a plaintextLength of 2 as we at least want to have an alert fit into it.
+                    // https://tools.ietf.org/html/rfc5246#section-7.2
+                    if (!isBytesAvailableEnoughForWrap(dst.remaining(), 2, 1)) {
+                        return new SSLEngineResult(BUFFER_OVERFLOW, getHandshakeStatus(), 0, 0);
+                    }
+
                     // There is something left to drain.
                     // See https://github.com/netty/netty/issues/6260
                     bytesProduced = SSL.bioFlushByteBuffer(networkBIO);
@@ -1093,8 +1102,6 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
     }
 
     private SSLEngineResult sslReadErrorResult(int err, int bytesConsumed, int bytesProduced) throws SSLException {
-        String errStr = SSL.getErrorString(err);
-
         // Check if we have a pending handshakeException and if so see if we need to consume all pending data from the
         // BIO first or can just shutdown and throw it now.
         // This is needed so we ensure close_notify etc is correctly send to the remote peer.
@@ -1103,11 +1110,14 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
             if (handshakeException == null && handshakeState != HandshakeState.FINISHED) {
                 // we seems to have data left that needs to be transfered and so the user needs
                 // call wrap(...). Store the error so we can pick it up later.
-                handshakeException = new SSLHandshakeException(errStr);
+                handshakeException = new SSLHandshakeException(SSL.getErrorString(err));
             }
+            // We need to clear all errors so we not pick up anything that was left on the stack on the next
+            // operation. Note that shutdownWithError(...) will cleanup the stack as well so its only needed here.
+            SSL.clearError();
             return new SSLEngineResult(OK, NEED_WRAP, bytesConsumed, bytesProduced);
         }
-        throw shutdownWithError("SSL_read", errStr);
+        throw shutdownWithError("SSL_read", SSL.getErrorString(err));
     }
 
     private void closeAll() throws SSLException {
@@ -1276,7 +1286,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
 
     @Override
     public final String[] getSupportedCipherSuites() {
-        return OpenSsl.AVAILABLE_CIPHER_SUITES.toArray(new String[OpenSsl.AVAILABLE_CIPHER_SUITES.size()]);
+        return OpenSsl.AVAILABLE_CIPHER_SUITES.toArray(new String[0]);
     }
 
     @Override
@@ -1349,7 +1359,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
 
     @Override
     public final String[] getSupportedProtocols() {
-        return OpenSsl.SUPPORTED_PROTOCOLS_SET.toArray(new String[OpenSsl.SUPPORTED_PROTOCOLS_SET.size()]);
+        return OpenSsl.SUPPORTED_PROTOCOLS_SET.toArray(new String[0]);
     }
 
     @Override
@@ -1363,7 +1373,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
             if (!isDestroyed()) {
                 opts = SSL.getOptions(ssl);
             } else {
-                return enabled.toArray(new String[1]);
+                return enabled.toArray(new String[0]);
             }
         }
         if (isProtocolEnabled(opts, SSL.SSL_OP_NO_TLSv1, PROTOCOL_TLS_V1)) {
@@ -1381,7 +1391,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
         if (isProtocolEnabled(opts, SSL.SSL_OP_NO_SSLv3, PROTOCOL_SSL_V3)) {
             enabled.add(PROTOCOL_SSL_V3);
         }
-        return enabled.toArray(new String[enabled.size()]);
+        return enabled.toArray(new String[0]);
     }
 
     private static boolean isProtocolEnabled(int opts, int disableMask, String protocolString) {
@@ -1557,7 +1567,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
 
         if (!certificateSet && keyMaterialManager != null) {
             certificateSet = true;
-            keyMaterialManager.setKeyMaterial(this);
+            keyMaterialManager.setKeyMaterialServerSide(this);
         }
 
         int code = SSL.doHandshake(ssl);
@@ -1773,10 +1783,20 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
             }
 
             final String endPointIdentificationAlgorithm = sslParameters.getEndpointIdentificationAlgorithm();
-            final boolean endPointVerificationEnabled = endPointIdentificationAlgorithm != null &&
-                    !endPointIdentificationAlgorithm.isEmpty();
-            SSL.setHostNameValidation(ssl, DEFAULT_HOSTNAME_VALIDATION_FLAGS,
-                    endPointVerificationEnabled ? getPeerHost() : null);
+            final boolean endPointVerificationEnabled = isEndPointVerificationEnabled(endPointIdentificationAlgorithm);
+
+            final boolean wasEndPointVerificationEnabled =
+                    isEndPointVerificationEnabled(this.endPointIdentificationAlgorithm);
+
+            if (wasEndPointVerificationEnabled && !endPointVerificationEnabled) {
+                // Passing in null will disable hostname verification again so only do so if it was enabled before.
+                SSL.setHostNameValidation(ssl, DEFAULT_HOSTNAME_VALIDATION_FLAGS, null);
+            } else {
+                String host = endPointVerificationEnabled ? getPeerHost() : null;
+                if (host != null && !host.isEmpty()) {
+                    SSL.setHostNameValidation(ssl, DEFAULT_HOSTNAME_VALIDATION_FLAGS, host);
+                }
+            }
             // If the user asks for hostname verification we must ensure we verify the peer.
             // If the user disables hostname verification we leave it up to the user to change the mode manually.
             if (clientMode && endPointVerificationEnabled) {
@@ -1787,6 +1807,10 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
             algorithmConstraints = sslParameters.getAlgorithmConstraints();
         }
         super.setSSLParameters(sslParameters);
+    }
+
+    private static boolean isEndPointVerificationEnabled(String endPointIdentificationAlgorithm) {
+        return endPointIdentificationAlgorithm != null && !endPointIdentificationAlgorithm.isEmpty();
     }
 
     private boolean isDestroyed() {
@@ -1931,7 +1955,7 @@ public class ReferenceCountedOpenSslEngine extends SSLEngine implements Referenc
             if (values == null || values.isEmpty()) {
                 return EmptyArrays.EMPTY_STRINGS;
             }
-            return values.keySet().toArray(new String[values.size()]);
+            return values.keySet().toArray(new String[0]);
         }
 
         private void notifyUnbound(Object value, String name) {

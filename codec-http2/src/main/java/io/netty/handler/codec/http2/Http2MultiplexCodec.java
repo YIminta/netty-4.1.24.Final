@@ -43,13 +43,20 @@ import io.netty.util.ReferenceCounted;
 import io.netty.util.internal.StringUtil;
 import io.netty.util.internal.ThrowableUtil;
 import io.netty.util.internal.UnstableApi;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.net.SocketAddress;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.RejectedExecutionException;
 
+import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_STREAM_ID;
 import static io.netty.handler.codec.http2.Http2CodecUtil.isStreamIdValid;
+import static io.netty.handler.codec.http2.Http2Error.INTERNAL_ERROR;
+import static io.netty.handler.codec.http2.Http2Exception.connectionError;
+
 import static java.lang.Math.min;
 
 /**
@@ -99,6 +106,8 @@ import static java.lang.Math.min;
  */
 @UnstableApi
 public class Http2MultiplexCodec extends Http2FrameCodec {
+
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultHttp2StreamChannel.class);
 
     private static final ChannelFutureListener CHILD_CHANNEL_REGISTRATION_LISTENER = new ChannelFutureListener() {
         @Override
@@ -153,6 +162,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     }
 
     private final ChannelHandler inboundStreamHandler;
+    private final ChannelHandler upgradeStreamHandler;
 
     private int initialOutboundStreamWindow = Http2CodecUtil.DEFAULT_WINDOW_SIZE;
     private boolean parentReadInProgress;
@@ -168,9 +178,25 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
     Http2MultiplexCodec(Http2ConnectionEncoder encoder,
                         Http2ConnectionDecoder decoder,
                         Http2Settings initialSettings,
-                        ChannelHandler inboundStreamHandler) {
+                        ChannelHandler inboundStreamHandler,
+                        ChannelHandler upgradeStreamHandler) {
         super(encoder, decoder, initialSettings);
         this.inboundStreamHandler = inboundStreamHandler;
+        this.upgradeStreamHandler = upgradeStreamHandler;
+    }
+
+    @Override
+    public void onHttpClientUpgrade() throws Http2Exception {
+        // We must have an upgrade handler or else we can't handle the stream
+        if (upgradeStreamHandler == null) {
+            throw connectionError(INTERNAL_ERROR, "Client is misconfigured for upgrade requests");
+        }
+        // Creates the Http2Stream in the Connection.
+        super.onHttpClientUpgrade();
+        // Now make a new FrameStream, set it's underlying Http2Stream, and initialize it.
+        Http2MultiplexCodecStream codecStream = newStream();
+        codecStream.setStreamAndProperty(streamKey, connection().stream(HTTP_UPGRADE_STREAM_ID));
+        onHttp2UpgradeStreamInitialized(ctx, codecStream);
     }
 
     private static void registerDone(ChannelFuture future) {
@@ -233,6 +259,22 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
         } else {
             // Send any other frames down the pipeline
             ctx.fireChannelRead(frame);
+        }
+    }
+
+    private void onHttp2UpgradeStreamInitialized(ChannelHandlerContext ctx, Http2MultiplexCodecStream stream) {
+        assert stream.state() == Http2Stream.State.HALF_CLOSED_LOCAL;
+        DefaultHttp2StreamChannel ch = new DefaultHttp2StreamChannel(stream, true);
+        ch.outboundClosed = true;
+
+        // Add our upgrade handler to the channel and then register the channel.
+        // The register call fires the channelActive, etc.
+        ch.pipeline().addLast(upgradeStreamHandler);
+        ChannelFuture future = ctx.channel().eventLoop().register(ch);
+        if (future.isDone()) {
+            registerDone(future);
+        } else {
+            future.addListener(CHILD_CHANNEL_REGISTRATION_LISTENER);
         }
     }
 
@@ -337,9 +379,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
         } catch (Http2Exception e) {
             ctx.fireExceptionCaught(e);
             ctx.close();
-        } finally {
-            // We need to ensure we release the goAwayFrame.
-            goAwayFrame.release();
         }
     }
 
@@ -865,9 +904,12 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 closePending = false;
                 fireChannelReadPending = false;
 
-                // Only ever send a reset frame if the connection is still alive as otherwise it makes no sense at
-                // all anyway.
-                if (parent().isActive() && !streamClosedWithoutError && isStreamIdValid(stream().id())) {
+                final boolean wasActive = isActive();
+
+                // Only ever send a reset frame if the connection is still alive and if the stream may have existed
+                // as otherwise we may send a RST on a stream in an invalid state and cause a connection error.
+                if (parent().isActive() && !streamClosedWithoutError &&
+                        connection().streamMayHaveExisted(stream().id())) {
                     Http2StreamFrame resetFrame = new DefaultHttp2ResetFrame(Http2Error.CANCEL).stream(stream());
                     write(resetFrame, unsafe().voidPromise());
                     flush();
@@ -888,10 +930,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                 closePromise.setSuccess();
                 promise.setSuccess();
 
-                pipeline().fireChannelInactive();
-                if (isRegistered()) {
-                    deregister(unsafe().voidPromise());
-                }
+                fireChannelInactiveAndDeregister(voidPromise(), wasActive);
             }
 
             @Override
@@ -901,15 +940,66 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
 
             @Override
             public void deregister(ChannelPromise promise) {
+                fireChannelInactiveAndDeregister(promise, false);
+            }
+
+            private void fireChannelInactiveAndDeregister(final ChannelPromise promise,
+                                                          final boolean fireChannelInactive) {
                 if (!promise.setUncancellable()) {
                     return;
                 }
-                if (registered) {
-                    registered = true;
+
+                if (!registered) {
                     promise.setSuccess();
-                    pipeline().fireChannelUnregistered();
-                } else {
-                    promise.setFailure(new IllegalStateException("Not registered"));
+                    return;
+                }
+
+                // As a user may call deregister() from within any method while doing processing in the ChannelPipeline,
+                // we need to ensure we do the actual deregister operation later. This is necessary to preserve the
+                // behavior of the AbstractChannel, which always invokes channelUnregistered and channelInactive
+                // events 'later' to ensure the current events in the handler are completed before these events.
+                //
+                // See:
+                // https://github.com/netty/netty/issues/4435
+                invokeLater(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (fireChannelInactive) {
+                            pipeline.fireChannelInactive();
+                        }
+                        // The user can fire `deregister` events multiple times but we only want to fire the pipeline
+                        // event if the channel was actually registered.
+                        if (registered) {
+                            registered = false;
+                            pipeline.fireChannelUnregistered();
+                        }
+                        safeSetSuccess(promise);
+                    }
+                });
+            }
+
+            private void safeSetSuccess(ChannelPromise promise) {
+                if (!(promise instanceof VoidChannelPromise) && !promise.trySuccess()) {
+                    logger.warn("Failed to mark a promise as success because it is done already: {}", promise);
+                }
+            }
+
+            private void invokeLater(Runnable task) {
+                try {
+                    // This method is used by outbound operation implementations to trigger an inbound event later.
+                    // They do not trigger an inbound event immediately because an outbound operation might have been
+                    // triggered by another inbound event handler method.  If fired immediately, the call stack
+                    // will look like this for example:
+                    //
+                    //   handlerA.inboundBufferUpdated() - (1) an inbound handler method closes a connection.
+                    //   -> handlerA.ctx.close()
+                    //     -> channel.unsafe.close()
+                    //       -> handlerA.channelInactive() - (2) another inbound handler method called while in (1) yet
+                    //
+                    // which means the execution of two inbound handler methods of the same handler overlap undesirably.
+                    eventLoop().execute(task);
+                } catch (RejectedExecutionException e) {
+                    logger.warn("Can't invoke task later as EventLoop rejected it", e);
                 }
             }
 
@@ -1056,9 +1146,9 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     writabilityChanged(Http2MultiplexCodec.this.isWritable(stream));
                     promise.setSuccess();
                 } else {
-                    promise.setFailure(wrapStreamClosedError(cause));
                     // If the first write fails there is not much we can do, just close
                     closeForcibly();
+                    promise.setFailure(wrapStreamClosedError(cause));
                 }
             }
 
@@ -1068,8 +1158,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     promise.setSuccess();
                 } else {
                     Throwable error = wrapStreamClosedError(cause);
-                    promise.setFailure(error);
-
                     if (error instanceof ClosedChannelException) {
                         if (config.isAutoClose()) {
                             // Close channel if needed.
@@ -1078,6 +1166,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                             outboundClosed = true;
                         }
                     }
+                    promise.setFailure(error);
                 }
             }
 

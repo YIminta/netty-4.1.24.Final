@@ -17,6 +17,7 @@
 package io.netty.handler.ssl;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.internal.tcnative.Buffer;
 import io.netty.internal.tcnative.Library;
@@ -33,7 +34,6 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -72,45 +72,60 @@ public final class OpenSsl {
     static {
         Throwable cause = null;
 
-        // Test if netty-tcnative is in the classpath first.
-        try {
-            Class.forName("io.netty.internal.tcnative.SSL", false, OpenSsl.class.getClassLoader());
-        } catch (ClassNotFoundException t) {
-            cause = t;
-            logger.debug(
-                    "netty-tcnative not in the classpath; " +
-                    OpenSslEngine.class.getSimpleName() + " will be unavailable.");
-        }
+        if (SystemPropertyUtil.getBoolean("io.netty.handler.ssl.noOpenSsl", false)) {
+            cause = new UnsupportedOperationException(
+                    "OpenSSL was explicit disabled with -Dio.netty.handler.ssl.noOpenSsl=true");
 
-        // If in the classpath, try to load the native library and initialize netty-tcnative.
-        if (cause == null) {
+            logger.debug(
+                    "netty-tcnative explicit disabled; " +
+                            OpenSslEngine.class.getSimpleName() + " will be unavailable.", cause);
+        } else {
+            // Test if netty-tcnative is in the classpath first.
             try {
-                // The JNI library was not already loaded. Load it now.
-                loadTcNative();
-            } catch (Throwable t) {
+                Class.forName("io.netty.internal.tcnative.SSL", false, OpenSsl.class.getClassLoader());
+            } catch (ClassNotFoundException t) {
                 cause = t;
                 logger.debug(
-                    "Failed to load netty-tcnative; " +
-                        OpenSslEngine.class.getSimpleName() + " will be unavailable, unless the " +
-                        "application has already loaded the symbols by some other means. " +
-                        "See http://netty.io/wiki/forked-tomcat-native.html for more information.", t);
+                        "netty-tcnative not in the classpath; " +
+                                OpenSslEngine.class.getSimpleName() + " will be unavailable.");
             }
 
-            try {
-                initializeTcNative();
-
-                // The library was initialized successfully. If loading the library failed above,
-                // reset the cause now since it appears that the library was loaded by some other
-                // means.
-                cause = null;
-            } catch (Throwable t) {
-                if (cause == null) {
+            // If in the classpath, try to load the native library and initialize netty-tcnative.
+            if (cause == null) {
+                try {
+                    // The JNI library was not already loaded. Load it now.
+                    loadTcNative();
+                } catch (Throwable t) {
                     cause = t;
+                    logger.debug(
+                            "Failed to load netty-tcnative; " +
+                                    OpenSslEngine.class.getSimpleName() + " will be unavailable, unless the " +
+                                    "application has already loaded the symbols by some other means. " +
+                                    "See http://netty.io/wiki/forked-tomcat-native.html for more information.", t);
                 }
-                logger.debug(
-                    "Failed to initialize netty-tcnative; " +
-                        OpenSslEngine.class.getSimpleName() + " will be unavailable. " +
-                        "See http://netty.io/wiki/forked-tomcat-native.html for more information.", t);
+
+                try {
+                    String engine = SystemPropertyUtil.get("io.netty.handler.ssl.openssl.engine", null);
+                    if (engine == null) {
+                        logger.debug("Initialize netty-tcnative using engine: 'default'");
+                    } else {
+                        logger.debug("Initialize netty-tcnative using engine: '{}'", engine);
+                    }
+                    initializeTcNative(engine);
+
+                    // The library was initialized successfully. If loading the library failed above,
+                    // reset the cause now since it appears that the library was loaded by some other
+                    // means.
+                    cause = null;
+                } catch (Throwable t) {
+                    if (cause == null) {
+                        cause = t;
+                    }
+                    logger.debug(
+                            "Failed to initialize netty-tcnative; " +
+                                    OpenSslEngine.class.getSimpleName() + " will be unavailable. " +
+                                    "See http://netty.io/wiki/forked-tomcat-native.html for more information.", t);
+                }
             }
         }
 
@@ -148,7 +163,7 @@ public final class OpenSsl {
                         }
                         try {
                             cert = new SelfSignedCertificate();
-                            certBio = ReferenceCountedOpenSslContext.toBIO(cert.cert());
+                            certBio = ReferenceCountedOpenSslContext.toBIO(ByteBufAllocator.DEFAULT, cert.cert());
                             SSL.setCertificateChainBio(ssl, certBio, false);
                             supportsKeyManagerFactory = true;
                             try {
@@ -208,19 +223,19 @@ public final class OpenSsl {
             Set<String> protocols = new LinkedHashSet<String>(6);
             // Seems like there is no way to explicitly disable SSLv2Hello in openssl so it is always enabled
             protocols.add(PROTOCOL_SSL_V2_HELLO);
-            if (doesSupportProtocol(SSL.SSL_PROTOCOL_SSLV2)) {
+            if (doesSupportProtocol(SSL.SSL_PROTOCOL_SSLV2, SSL.SSL_OP_NO_SSLv2)) {
                 protocols.add(PROTOCOL_SSL_V2);
             }
-            if (doesSupportProtocol(SSL.SSL_PROTOCOL_SSLV3)) {
+            if (doesSupportProtocol(SSL.SSL_PROTOCOL_SSLV3, SSL.SSL_OP_NO_SSLv3)) {
                 protocols.add(PROTOCOL_SSL_V3);
             }
-            if (doesSupportProtocol(SSL.SSL_PROTOCOL_TLSV1)) {
+            if (doesSupportProtocol(SSL.SSL_PROTOCOL_TLSV1, SSL.SSL_OP_NO_TLSv1)) {
                 protocols.add(PROTOCOL_TLS_V1);
             }
-            if (doesSupportProtocol(SSL.SSL_PROTOCOL_TLSV1_1)) {
+            if (doesSupportProtocol(SSL.SSL_PROTOCOL_TLSV1_1, SSL.SSL_OP_NO_TLSv1_1)) {
                 protocols.add(PROTOCOL_TLS_V1_1);
             }
-            if (doesSupportProtocol(SSL.SSL_PROTOCOL_TLSV1_2)) {
+            if (doesSupportProtocol(SSL.SSL_PROTOCOL_TLSV1_2, SSL.SSL_OP_NO_TLSv1_2)) {
                 protocols.add(PROTOCOL_TLS_V1_2);
             }
 
@@ -228,7 +243,7 @@ public final class OpenSsl {
             SUPPORTS_OCSP = doesSupportOcsp();
 
             if (logger.isDebugEnabled()) {
-                logger.debug("Supported protocols (OpenSSL): {} ", Arrays.asList(SUPPORTED_PROTOCOLS_SET));
+                logger.debug("Supported protocols (OpenSSL): {} ", SUPPORTED_PROTOCOLS_SET);
                 logger.debug("Default cipher suites (OpenSSL): {}", DEFAULT_CIPHERS);
             }
         } else {
@@ -262,7 +277,11 @@ public final class OpenSsl {
         }
         return supportsOcsp;
     }
-    private static boolean doesSupportProtocol(int protocol) {
+    private static boolean doesSupportProtocol(int protocol, int opt) {
+        if (opt == 0) {
+            // If the opt is 0 the protocol is not supported. This is for example the case with BoringSSL and SSLv2.
+            return false;
+        }
         long sslCtx = -1;
         try {
             sslCtx = SSLContext.make(protocol, SSL.SSL_MODE_COMBINED);
@@ -419,11 +438,11 @@ public final class OpenSsl {
         libNames.add(staticLibName);
 
         NativeLibraryLoader.loadFirstAvailable(SSL.class.getClassLoader(),
-            libNames.toArray(new String[libNames.size()]));
+            libNames.toArray(new String[0]));
     }
 
-    private static boolean initializeTcNative() throws Exception {
-        return Library.initialize();
+    private static boolean initializeTcNative(String engine) throws Exception {
+        return Library.initialize("provided", engine);
     }
 
     static void releaseIfNeeded(ReferenceCounted counted) {

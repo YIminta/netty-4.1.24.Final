@@ -179,8 +179,6 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             return new SelectorTuple(unwrappedSelector);
         }
 
-        final SelectedSelectionKeySet selectedKeySet = new SelectedSelectionKeySet();
-
         Object maybeSelectorImplClass = AccessController.doPrivileged(new PrivilegedAction<Object>() {
             @Override
             public Object run() {
@@ -206,6 +204,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         final Class<?> selectorImplClass = (Class<?>) maybeSelectorImplClass;
+        final SelectedSelectionKeySet selectedKeySet = new SelectedSelectionKeySet();
 
         Object maybeException = AccessController.doPrivileged(new PrivilegedAction<Object>() {
             @Override
@@ -395,7 +394,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             }
         }
 
-        logger.info("Migrated " + nChannels + " channel(s) to the new Selector.");
+        if (logger.isInfoEnabled()) {
+            logger.info("Migrated " + nChannels + " channel(s) to the new Selector.");
+        }
     }
 
     @Override
@@ -730,6 +731,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             int selectCnt = 0;
             long currentTimeNanos = System.nanoTime();
             long selectDeadLineNanos = currentTimeNanos + delayNanos(currentTimeNanos);
+
             for (;;) {
                 long timeoutMillis = (selectDeadLineNanos - currentTimeNanos + 500000L) / 1000000L;
                 if (timeoutMillis <= 0) {

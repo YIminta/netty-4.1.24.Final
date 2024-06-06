@@ -43,6 +43,9 @@ public class DefaultDnsCache implements DnsCache {
 
     private final ConcurrentMap<String, Entries> resolveCache = PlatformDependent.newConcurrentHashMap();
 
+    // Two years are supported by all our EventLoop implementations and so safe to use as maximum.
+    // See also: https://github.com/netty/netty/commit/b47fb817991b42ec8808c7d26538f3f2464e1fa6
+    private static final int MAX_SUPPORTED_TTL_SECS = (int) TimeUnit.DAYS.toSeconds(365 * 2);
     private final int minTtl;
     private final int maxTtl;
     private final int negativeTtl;
@@ -52,7 +55,7 @@ public class DefaultDnsCache implements DnsCache {
      * and doesn't cache negative responses.
      */
     public DefaultDnsCache() {
-        this(0, Integer.MAX_VALUE, 0);
+        this(0, MAX_SUPPORTED_TTL_SECS, 0);
     }
 
     /**
@@ -62,8 +65,8 @@ public class DefaultDnsCache implements DnsCache {
      * @param negativeTtl the TTL for failed queries
      */
     public DefaultDnsCache(int minTtl, int maxTtl, int negativeTtl) {
-        this.minTtl = checkPositiveOrZero(minTtl, "minTtl");
-        this.maxTtl = checkPositiveOrZero(maxTtl, "maxTtl");
+        this.minTtl = Math.min(MAX_SUPPORTED_TTL_SECS, checkPositiveOrZero(minTtl, "minTtl"));
+        this.maxTtl = Math.min(MAX_SUPPORTED_TTL_SECS, checkPositiveOrZero(maxTtl, "maxTtl"));
         if (minTtl > maxTtl) {
             throw new IllegalArgumentException(
                     "minTtl: " + minTtl + ", maxTtl: " + maxTtl + " (expected: 0 <= minTtl <= maxTtl)");
@@ -141,7 +144,7 @@ public class DefaultDnsCache implements DnsCache {
         if (maxTtl == 0 || !emptyAdditionals(additionals)) {
             return e;
         }
-        cache0(e, Math.max(minTtl, (int) Math.min(maxTtl, originalTtl)), loop);
+        cache0(e, Math.max(minTtl, Math.min(MAX_SUPPORTED_TTL_SECS, (int) Math.min(maxTtl, originalTtl))), loop);
         return e;
     }
 
@@ -156,7 +159,7 @@ public class DefaultDnsCache implements DnsCache {
             return e;
         }
 
-        cache0(e, negativeTtl, loop);
+        cache0(e, Math.min(MAX_SUPPORTED_TTL_SECS, negativeTtl), loop);
         return e;
     }
 
@@ -167,9 +170,9 @@ public class DefaultDnsCache implements DnsCache {
             Entries oldEntries = resolveCache.putIfAbsent(e.hostname(), entries);
             if (oldEntries != null) {
                 entries = oldEntries;
-                entries.add(e);
             }
         }
+        entries.add(e);
 
         scheduleCacheExpiration(e, ttl, loop);
     }
@@ -285,11 +288,27 @@ public class DefaultDnsCache implements DnsCache {
                                 continue;
                             }
                         }
+
                         // Create a new List for COW semantics
                         List<DefaultDnsCacheEntry> newEntries = new ArrayList<DefaultDnsCacheEntry>(entries.size() + 1);
-                        newEntries.addAll(entries);
+                        DefaultDnsCacheEntry replacedEntry = null;
+                        for (int i = 0; i < entries.size(); i++) {
+                            DefaultDnsCacheEntry entry = entries.get(i);
+                            // Only add old entry if the address is not the same as the one we try to add as well.
+                            // In this case we will skip it and just add the new entry as this may have
+                            // more up-to-date data and cancel the old after we were able to update the cache.
+                            if (!e.address().equals(entry.address())) {
+                                newEntries.add(entry);
+                            } else {
+                                assert replacedEntry == null;
+                                replacedEntry = entry;
+                            }
+                        }
                         newEntries.add(e);
                         if (compareAndSet(entries, newEntries)) {
+                            if (replacedEntry != null) {
+                                replacedEntry.cancelExpiration();
+                            }
                             return;
                         }
                     } else if (compareAndSet(entries, Collections.singletonList(e))) {

@@ -65,7 +65,7 @@ abstract class AbstractKQueueChannel extends AbstractChannel implements UnixChan
     private SocketAddress requestedRemoteAddress;
 
     final BsdSocket socket;
-    private boolean readFilterEnabled = true;
+    private boolean readFilterEnabled;
     private boolean writeFilterEnabled;
     boolean readReadyRunnablePending;
     boolean inputClosedSeenErrorOnRead;
@@ -187,9 +187,6 @@ abstract class AbstractKQueueChannel extends AbstractChannel implements UnixChan
         evSet0(Native.EVFILT_SOCK, Native.EV_DELETE, 0);
 
         ((KQueueEventLoop) eventLoop()).remove(this);
-
-        // Set the filters back to the initial state in case this channel is registered with another event loop.
-        readFilterEnabled = true;
     }
 
     @Override
@@ -405,15 +402,8 @@ abstract class AbstractKQueueChannel extends AbstractChannel implements UnixChan
 
         final void readReadyFinally(ChannelConfig config) {
             maybeMoreDataToRead = allocHandle.maybeMoreDataToRead();
-            // Check if there is a readPending which was not processed yet.
-            // This could be for two reasons:
-            // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
-            // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
-            //
-            // See https://github.com/netty/netty/issues/2254
-            if (!readPending && !config.isAutoRead()) {
-                clearReadFilter0();
-            } else if (readPending && maybeMoreDataToRead) {
+
+            if (allocHandle.isReadEOF() || (readPending && maybeMoreDataToRead)) {
                 // trigger a read again as there may be something left to read and because of ET we
                 // will not get notified again until we read everything from the socket
                 //
@@ -422,6 +412,14 @@ abstract class AbstractKQueueChannel extends AbstractChannel implements UnixChan
                 // to false before every read operation to prevent re-entry into readReady() we will not read from
                 // the underlying OS again unless the user happens to call read again.
                 executeReadReadyRunnable(config);
+            } else if (!readPending && !config.isAutoRead()) {
+                // Check if there is a readPending which was not processed yet.
+                // This could be for two reasons:
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
+                //
+                // See https://github.com/netty/netty/issues/2254
+                clearReadFilter0();
             }
         }
 

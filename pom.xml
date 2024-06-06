@@ -26,7 +26,7 @@
   <groupId>io.netty</groupId>
   <artifactId>netty-parent</artifactId>
   <packaging>pom</packaging>
-  <version>4.1.24.Final</version>
+  <version>4.1.26.Final</version>
 
   <name>Netty</name>
   <url>http://netty.io/</url>
@@ -53,7 +53,7 @@
     <url>https://github.com/netty/netty</url>
     <connection>scm:git:git://github.com/netty/netty.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/netty/netty.git</developerConnection>
-    <tag>netty-4.1.24.Final</tag>
+    <tag>netty-4.1.26.Final</tag>
   </scm>
 
   <developers>
@@ -68,6 +68,40 @@
   </developers>
 
   <profiles>
+    <!-- JDK11 -->
+    <profile>
+      <id>java11</id>
+      <activation>
+        <jdk>11</jdk>
+      </activation>
+      <properties>
+        <!-- Not use alpn agent as Java11 supports alpn out of the box -->
+        <argLine.alpnAgent />
+        <forbiddenapis.skip>true</forbiddenapis.skip>
+        <!-- Needed because of https://issues.apache.org/jira/browse/MENFORCER-275 -->
+        <enforcer.plugin.version>3.0.0-M1</enforcer.plugin.version>
+        <!-- 1.4.x does not work in Java10+ -->
+        <jboss.marshalling.version>2.0.5.Final</jboss.marshalling.version>
+      </properties>
+    </profile>
+
+    <!-- JDK10 -->
+    <profile>
+      <id>java10</id>
+      <activation>
+        <jdk>10</jdk>
+      </activation>
+      <properties>
+        <!-- Not use alpn agent as Java10 supports alpn out of the box -->
+        <argLine.alpnAgent />
+        <forbiddenapis.skip>true</forbiddenapis.skip>
+        <!-- Needed because of https://issues.apache.org/jira/browse/MENFORCER-275 -->
+        <enforcer.plugin.version>3.0.0-M1</enforcer.plugin.version>
+        <!-- 1.4.x does not work in Java10+ -->
+        <jboss.marshalling.version>2.0.5.Final</jboss.marshalling.version>
+      </properties>
+    </profile>
+
     <!-- JDK9 -->
     <profile>
       <id>java9</id>
@@ -78,7 +112,6 @@
         <!-- Not use alpn agent as Java9 supports alpn out of the box -->
         <argLine.alpnAgent />
         <!-- Skip as maven plugin not works with Java9 yet --> 
-        <skipOsgiTestsuite>true</skipOsgiTestsuite>
         <forbiddenapis.skip>true</forbiddenapis.skip>
         <!-- Needed because of https://issues.apache.org/jira/browse/MENFORCER-275 -->
         <enforcer.plugin.version>3.0.0-M1</enforcer.plugin.version>
@@ -174,11 +207,6 @@
     <argLine.common>
       -server
       -dsa -da -ea:io.netty...
-      -XX:+AggressiveOpts
-      -XX:+TieredCompilation
-      -XX:+UseBiasedLocking
-      -XX:+UseFastAccessorMethods
-      -XX:+OptimizeStringConcat
       -XX:+HeapDumpOnOutOfMemoryError
     </argLine.common>
     <!-- Default to ALPN. See forcenpn profile to force NPN -->
@@ -193,11 +221,11 @@
     <!-- Fedora-"like" systems. This is currently only used for the netty-tcnative dependency -->
     <os.detection.classifierWithLikes>fedora</os.detection.classifierWithLikes>
     <tcnative.artifactId>netty-tcnative</tcnative.artifactId>
-    <tcnative.version>2.0.8.Final</tcnative.version>
+    <tcnative.version>2.0.12.Final</tcnative.version>
     <tcnative.classifier>${os.detected.classifier}</tcnative.classifier>
     <conscrypt.groupId>org.conscrypt</conscrypt.groupId>
     <conscrypt.artifactId>conscrypt-openjdk-uber</conscrypt.artifactId>
-    <conscrypt.version>1.0.1</conscrypt.version>
+    <conscrypt.version>1.1.3</conscrypt.version>
     <conscrypt.classifier />
     <jni.classifier>${os.detected.name}-${os.detected.arch}</jni.classifier>
     <logging.config>${project.basedir}/../common/src/test/resources/logback-test.xml</logging.config>
@@ -255,6 +283,13 @@
         <groupId>${project.groupId}</groupId>
         <artifactId>netty-dev-tools</artifactId>
         <version>${project.version}</version>
+      </dependency>
+
+      <!-- Needed for java11 and later as javax.activation is not part of the JDK anymore -->
+      <dependency>
+        <groupId>com.sun.activation</groupId>
+        <artifactId>javax.activation</artifactId>
+        <version>1.2.0</version>
       </dependency>
 
       <!-- Byte code generator - completely optional -->
@@ -467,7 +502,7 @@
       <dependency>
         <groupId>org.mockito</groupId>
         <artifactId>mockito-core</artifactId>
-        <version>2.7.2</version>
+        <version>2.18.3</version>
         <scope>test</scope>
       </dependency>
       <dependency>
@@ -576,7 +611,7 @@
       <extension>
         <groupId>kr.motd.maven</groupId>
         <artifactId>os-maven-plugin</artifactId>
-        <version>1.5.0.Final</version>
+        <version>1.6.0</version>
       </extension>
     </extensions>
 
@@ -602,10 +637,10 @@
                 </requireMavenVersion>
                 <requireProperty>
                   <regexMessage>
-                    x86_64 JDK must be used.
+                    x86_64/AARCH64 JDK must be used.
                   </regexMessage>
                   <property>os.detected.arch</property>
-                  <regex>^x86_64$</regex>
+                  <regex>^(x86_64|aarch_64)$</regex>
                 </requireProperty>
               </rules>
             </configuration>
@@ -829,6 +864,8 @@
             </property>
           </properties>
           <jvm>${testJavaHome}/bin/java</jvm>
+           <!-- Ensure the whole stacktrace is preserved when an exception is thrown. See https://issues.apache.org/jira/browse/SUREFIRE-1457 --> 
+          <trimStackTrace>false</trimStackTrace>
         </configuration>
       </plugin>
       <!-- always produce osgi bundles -->
