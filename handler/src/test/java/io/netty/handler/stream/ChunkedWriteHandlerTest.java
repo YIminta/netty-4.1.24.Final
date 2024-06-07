@@ -30,6 +30,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.channels.Channels;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.assertEquals;
@@ -223,7 +224,7 @@ public class ChunkedWriteHandlerTest {
         ch.checkException();
         assertTrue(ch.finish());
 
-        assertEquals(0, ch.readOutbound());
+        assertEquals(Optional.of(0), ch.readOutbound());
         assertNull(ch.readOutbound());
     }
 

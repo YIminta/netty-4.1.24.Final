@@ -23,6 +23,7 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.Assert.*;
 
@@ -62,7 +63,7 @@ public class ByteToMessageCodecTest {
         assertTrue(ch.writeInbound(buffer));
         ch.pipeline().remove(codec);
         assertTrue(ch.finish());
-        assertEquals(1, ch.readInbound());
+        assertEquals(Optional.of(1), ch.readInbound());
 
         ByteBuf buf = (ByteBuf) ch.readInbound();
         assertEquals(Unpooled.wrappedBuffer(new byte[]{'0'}), buf);
