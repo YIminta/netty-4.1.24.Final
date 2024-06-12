@@ -48,13 +48,30 @@ import java.util.Map;
  * transports such as datagram (UDP).</p>
  */
 public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C extends Channel> implements Cloneable {
-
+    /**
+     * EventLoopGroup 对象
+     */
     volatile EventLoopGroup group;
+    /**
+     * Channel 工厂，用于创建 Channel 对象。
+     */
     @SuppressWarnings("deprecation")
     private volatile ChannelFactory<? extends C> channelFactory;
+    /**
+     * 本地地址
+     */
     private volatile SocketAddress localAddress;
+    /**
+     * 可选项集合
+     */
     private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
+    /**
+     * 属性集合
+     */
     private final Map<AttributeKey<?>, Object> attrs = new LinkedHashMap<AttributeKey<?>, Object>();
+    /**
+     * 处理器
+     */
     private volatile ChannelHandler handler;
 
     AbstractBootstrap() {
@@ -82,7 +99,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         if (group == null) {
             throw new NullPointerException("group");
         }
-        if (this.group != null) {
+        if (this.group != null) {// 不允许重复设置
             throw new IllegalStateException("group set already");
         }
         this.group = group;
@@ -171,11 +188,11 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         if (option == null) {
             throw new NullPointerException("option");
         }
-        if (value == null) {
+        if (value == null) {// 空，意味着移除
             synchronized (options) {
                 options.remove(option);
             }
-        } else {
+        } else {// 非空，进行修改
             synchronized (options) {
                 options.put(option, value);
             }
@@ -191,11 +208,11 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         if (key == null) {
             throw new NullPointerException("key");
         }
-        if (value == null) {
+        if (value == null) {// 空，意味着移除
             synchronized (attrs) {
                 attrs.remove(key);
             }
-        } else {
+        } else {// 非空，进行修改
             synchronized (attrs) {
                 attrs.put(key, value);
             }
@@ -238,11 +255,13 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
      * Create a new {@link Channel} and bind it.
      */
     public ChannelFuture bind() {
+        // 校验服务启动需要的必要参数
         validate();
         SocketAddress localAddress = this.localAddress;
         if (localAddress == null) {
             throw new IllegalStateException("localAddress not set");
         }
+        // 绑定本地地址( 包括端口 )
         return doBind(localAddress);
     }
 
@@ -271,24 +290,27 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
      * Create a new {@link Channel} and bind it.
      */
     public ChannelFuture bind(SocketAddress localAddress) {
+        // 校验服务启动需要的必要参数
         validate();
         if (localAddress == null) {
             throw new NullPointerException("localAddress");
         }
+        // 绑定本地地址( 包括端口 )
         return doBind(localAddress);
     }
 
     private ChannelFuture doBind(final SocketAddress localAddress) {
+        // 初始化并注册一个 Channel 对象，因为注册是异步的过程，所以返回一个 ChannelFuture 对象。
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
-        if (regFuture.cause() != null) {
+        if (regFuture.cause() != null) {// 若发生异常，直接进行返回。
             return regFuture;
         }
-
-        if (regFuture.isDone()) {
+        // 绑定 Channel 的端口，并注册 Channel 到 SelectionKey 中。
+        if (regFuture.isDone()) {// 未
             // At this point we know that the registration was complete and successful.
             ChannelPromise promise = channel.newPromise();
-            doBind0(regFuture, channel, localAddress, promise);
+            doBind0(regFuture, channel, localAddress, promise);// 绑定
             return promise;
         } else {
             // Registration future is almost always fulfilled already, but just in case it's not.
@@ -306,7 +328,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
                         // See https://github.com/netty/netty/issues/2586
                         promise.registered();
 
-                        doBind0(regFuture, channel, localAddress, promise);
+                        doBind0(regFuture, channel, localAddress, promise); // 绑定
                     }
                 }
             });
@@ -317,25 +339,27 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            // 创建 Channel 对象
             channel = channelFactory.newChannel();
+            // 初始化 Channel 配置
             init(channel);
         } catch (Throwable t) {
-            if (channel != null) {
+            if (channel != null) { // 已创建 Channel 对象
                 // channel can be null if newChannel crashed (eg SocketException("too many open files"))
-                channel.unsafe().closeForcibly();
+                channel.unsafe().closeForcibly(); // 强制关闭 Channel
                 // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
                 return new DefaultChannelPromise(channel, GlobalEventExecutor.INSTANCE).setFailure(t);
             }
             // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
             return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
         }
-
+        // 注册 Channel 到 EventLoopGroup 中
         ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {
                 channel.close();
             } else {
-                channel.unsafe().closeForcibly();
+                channel.unsafe().closeForcibly(); // 强制关闭 Channel
             }
         }
 
@@ -362,9 +386,11 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {
+                // 注册成功，绑定端口
                 if (regFuture.isSuccess()) {
                     channel.bind(localAddress, promise).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
                 } else {
+                    // 注册失败，回调通知 promise 异常
                     promise.setFailure(regFuture.cause());
                 }
             }
