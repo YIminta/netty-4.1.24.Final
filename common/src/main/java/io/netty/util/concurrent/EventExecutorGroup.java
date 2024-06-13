@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  *
  */
 public interface EventExecutorGroup extends ScheduledExecutorService, Iterable<EventExecutor> {
-
+    // ========== 自定义接口 ==========
     /**
      * Returns {@code true} if and only if all {@link EventExecutor}s managed by this {@link EventExecutorGroup}
      * are being {@linkplain #shutdownGracefully() shut down gracefully} or was {@linkplain #isShutdown() shut down}.
@@ -37,7 +37,7 @@ public interface EventExecutorGroup extends ScheduledExecutorService, Iterable<E
 
     /**
      * Shortcut method for {@link #shutdownGracefully(long, long, TimeUnit)} with sensible default values.
-     *
+     * 优雅关闭
      * @return the {@link #terminationFuture()}
      */
     Future<?> shutdownGracefully();
@@ -53,7 +53,7 @@ public interface EventExecutorGroup extends ScheduledExecutorService, Iterable<E
      * @param timeout     the maximum amount of time to wait until the executor is {@linkplain #shutdown()}
      *                    regardless if a task was submitted during the quiet period
      * @param unit        the unit of {@code quietPeriod} and {@code timeout}
-     *
+     * 优雅关闭
      * @return the {@link #terminationFuture()}
      */
     Future<?> shutdownGracefully(long quietPeriod, long timeout, TimeUnit unit);
@@ -65,26 +65,17 @@ public interface EventExecutorGroup extends ScheduledExecutorService, Iterable<E
     Future<?> terminationFuture();
 
     /**
-     * @deprecated {@link #shutdownGracefully(long, long, TimeUnit)} or {@link #shutdownGracefully()} instead.
-     */
-    @Override
-    @Deprecated
-    void shutdown();
-
-    /**
-     * @deprecated {@link #shutdownGracefully(long, long, TimeUnit)} or {@link #shutdownGracefully()} instead.
-     */
-    @Override
-    @Deprecated
-    List<Runnable> shutdownNow();
-
-    /**
      * Returns one of the {@link EventExecutor}s managed by this {@link EventExecutorGroup}.
+     * 选择一个 EventExecutor 对象
      */
     EventExecutor next();
 
+    // ========== 实现自 Iterable 接口 ==========
+
     @Override
     Iterator<EventExecutor> iterator();
+
+    // ========== 实现自 ExecutorService 接口 ==========
 
     @Override
     Future<?> submit(Runnable task);
@@ -94,6 +85,20 @@ public interface EventExecutorGroup extends ScheduledExecutorService, Iterable<E
 
     @Override
     <T> Future<T> submit(Callable<T> task);
+    /**
+     * @deprecated {@link #shutdownGracefully(long, long, TimeUnit)} or {@link #shutdownGracefully()} instead.
+     */
+    @Override
+    @Deprecated
+    void shutdown();
+    /**
+     * @deprecated {@link #shutdownGracefully(long, long, TimeUnit)} or {@link #shutdownGracefully()} instead.
+     */
+    @Override
+    @Deprecated
+    List<Runnable> shutdownNow();
+
+    // ========== 实现自 ScheduledExecutorService 接口 ==========
 
     @Override
     ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit);

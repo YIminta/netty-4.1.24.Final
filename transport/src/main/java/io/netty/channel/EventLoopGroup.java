@@ -23,12 +23,14 @@ import io.netty.util.concurrent.EventExecutorGroup;
  *
  */
 public interface EventLoopGroup extends EventExecutorGroup {
+    // ========== 实现自 EventExecutorGroup 接口 ==========
     /**
      * Return the next {@link EventLoop} to use
      */
     @Override
     EventLoop next();
 
+    // ========== 自定义接口 ==========
     /**
      * Register a {@link Channel} with this {@link EventLoop}. The returned {@link ChannelFuture}
      * will get notified once the registration was complete.

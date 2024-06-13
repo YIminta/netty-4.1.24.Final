@@ -24,7 +24,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @UnstableApi
 public final class DefaultEventExecutorChooserFactory implements EventExecutorChooserFactory {
-
+    /**
+     * 单例
+     */
     public static final DefaultEventExecutorChooserFactory INSTANCE = new DefaultEventExecutorChooserFactory();
 
     private DefaultEventExecutorChooserFactory() { }
@@ -32,7 +34,7 @@ public final class DefaultEventExecutorChooserFactory implements EventExecutorCh
     @SuppressWarnings("unchecked")
     @Override
     public EventExecutorChooser newChooser(EventExecutor[] executors) {
-        if (isPowerOfTwo(executors.length)) {
+        if (isPowerOfTwo(executors.length)) {// 是否为 2 的幂次方
             return new PowerOfTwoEventExecutorChooser(executors);
         } else {
             return new GenericEventExecutorChooser(executors);
@@ -44,7 +46,13 @@ public final class DefaultEventExecutorChooserFactory implements EventExecutorCh
     }
 
     private static final class PowerOfTwoEventExecutorChooser implements EventExecutorChooser {
+        /**
+         * 自增序列
+         */
         private final AtomicInteger idx = new AtomicInteger();
+        /**
+         * EventExecutor 数组
+         */
         private final EventExecutor[] executors;
 
         PowerOfTwoEventExecutorChooser(EventExecutor[] executors) {
@@ -58,7 +66,13 @@ public final class DefaultEventExecutorChooserFactory implements EventExecutorCh
     }
 
     private static final class GenericEventExecutorChooser implements EventExecutorChooser {
+        /**
+         * 自增序列
+         */
         private final AtomicInteger idx = new AtomicInteger();
+        /**
+         * EventExecutor 数组
+         */
         private final EventExecutor[] executors;
 
         GenericEventExecutorChooser(EventExecutor[] executors) {

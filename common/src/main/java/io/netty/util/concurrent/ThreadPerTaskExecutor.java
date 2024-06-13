@@ -20,14 +20,20 @@ import java.util.concurrent.ThreadFactory;
 
 public final class ThreadPerTaskExecutor implements Executor {
     private final ThreadFactory threadFactory;
-
+    /**
+     * 线程工厂对象
+     */
     public ThreadPerTaskExecutor(ThreadFactory threadFactory) {
         if (threadFactory == null) {
             throw new NullPointerException("threadFactory");
         }
         this.threadFactory = threadFactory;
     }
-
+    /**
+     * 执行任务
+     *
+     * @param command 任务
+     */
     @Override
     public void execute(Runnable command) {
         threadFactory.newThread(command).start();
