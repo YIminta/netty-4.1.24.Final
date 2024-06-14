@@ -253,6 +253,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     /**
      * @see Queue#poll()
+     * // 取得并移除任务队列的头部任务，忽略WAKEUP_TASK标记任务
      */
     protected Runnable pollTask() {
         assert inEventLoop();

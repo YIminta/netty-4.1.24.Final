@@ -46,9 +46,9 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
     protected AbstractScheduledEventExecutor(EventExecutorGroup parent) {
         super(parent);
     }
-
+    // 返回当前时间(相对时间)
     protected static long nanoTime() {
-        return ScheduledFutureTask.nanoTime();
+        return ScheduledFutureTask.nanoTime(); // 使用ScheduledFutureTask的相对时间
     }
 
     PriorityQueue<ScheduledFutureTask<?>> scheduledTaskQueue() {
@@ -97,6 +97,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
     /**
      * Return the {@link Runnable} which is ready to be executed with the given {@code nanoTime}.
      * You should use {@link #nanoTime()} to retrieve the correct {@code nanoTime}.
+     * 取得并移除截止时间大于nanoTime的下一个调度任务
      */
     protected final Runnable pollScheduledTask(long nanoTime) {
         assert inEventLoop();
@@ -116,6 +117,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
 
     /**
      * Return the nanoseconds when the next scheduled task is ready to be run or {@code -1} if no task is scheduled.
+     * 取得距离下一个调度任务执行的间隔时间
      */
     protected final long nextScheduledTaskNano() {
         Queue<ScheduledFutureTask<?>> scheduledTaskQueue = this.scheduledTaskQueue;
@@ -126,6 +128,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
         return Math.max(0, scheduledTask.deadlineNanos() - nanoTime());
     }
 
+    // 取得但并不移除下一个调度任务
     final ScheduledFutureTask<?> peekScheduledTask() {
         Queue<ScheduledFutureTask<?>> scheduledTaskQueue = this.scheduledTaskQueue;
         if (scheduledTaskQueue == null) {
@@ -136,6 +139,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
 
     /**
      * Returns {@code true} if a scheduled task is ready for processing.
+     * 是否有将要执行的调度任务
      */
     protected final boolean hasScheduledTasks() {
         Queue<ScheduledFutureTask<?>> scheduledTaskQueue = this.scheduledTaskQueue;
@@ -240,6 +244,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
         return task;
     }
 
+    // 删除一个调度任务
     final void removeScheduled(final ScheduledFutureTask<?> task) {
         if (inEventLoop()) {
             scheduledTaskQueue().removeTyped(task);
