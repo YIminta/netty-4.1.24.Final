@@ -186,8 +186,10 @@ public class LoggingHandler extends ChannelDuplexHandler {
     @Override
     public void bind(ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) throws Exception {
         if (logger.isEnabled(internalLevel)) {
+            // 打印日志
             logger.log(internalLevel, format(ctx, "BIND", localAddress));
         }
+        // 传递 bind 事件，给下一个节点
         ctx.bind(localAddress, promise);
     }
 
