@@ -40,11 +40,11 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractChannelHandlerContext.class);
     /**
-     * 上一个节点
+     * 下一个节点
      */
     volatile AbstractChannelHandlerContext next;
     /**
-     * 下一个节点
+     * 上一个节点
      */
     volatile AbstractChannelHandlerContext prev;
     /**
@@ -892,6 +892,7 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
     }
 
     private void notifyHandlerException(Throwable cause) {
+        // <1> 如果是在 `ChannelHandler#exceptionCaught(ChannelHandlerContext ctx, Throwable cause)` 方法中，仅打印错误日志。否则会形成死循环。
         if (inExceptionCaught(cause)) {
             if (logger.isWarnEnabled()) {
                 logger.warn(
@@ -900,7 +901,7 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
             }
             return;
         }
-
+        // <2> 在 pipeline 中，传播 Exception Caught 事件
         invokeExceptionCaught(cause);
     }
 
@@ -908,17 +909,17 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
         do {
             StackTraceElement[] trace = cause.getStackTrace();
             if (trace != null) {
-                for (StackTraceElement t : trace) {
+                for (StackTraceElement t : trace) { // 循环 StackTraceElement
                     if (t == null) {
                         break;
                     }
-                    if ("exceptionCaught".equals(t.getMethodName())) {
+                    if ("exceptionCaught".equals(t.getMethodName())) { // 通过方法名判断
                         return true;
                     }
                 }
             }
 
-            cause = cause.getCause();
+            cause = cause.getCause(); // 循环异常的 cause() ，直到到没有
         } while (cause != null);
 
         return false;
