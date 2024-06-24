@@ -437,7 +437,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      * {@link Unsafe} implementation which sub-classes must extend and use.
      */
     protected abstract class AbstractUnsafe implements Unsafe {
-
+        /**
+         * 内存队列
+         */
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
         private RecvByteBufAllocator.Handle recvHandle;
         private boolean inFlush0;
@@ -891,7 +893,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             assertEventLoop();
 
             ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            // 内存队列为空
             if (outboundBuffer == null) {
+                // 内存队列为空，一般是 Channel 已经关闭，所以通知 Promise 异常结果
                 // If the outboundBuffer is null we know the channel was closed and so
                 // need to fail the future right away. If it is not null the handling of the rest
                 // will be done in flush0()
@@ -904,17 +908,21 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
             int size;
             try {
+                // 过滤写入的消息( 数据 )
                 msg = filterOutboundMessage(msg);
+                // 计算消息的长度
                 size = pipeline.estimatorHandle().size(msg);
                 if (size < 0) {
                     size = 0;
                 }
             } catch (Throwable t) {
+                // 通知 Promise 异常结果
                 safeSetFailure(promise, t);
+                // 释放消息( 对象 )相关的资源
                 ReferenceCountUtil.release(msg);
                 return;
             }
-
+            // 写入消息( 数据 )到内存队列
             outboundBuffer.addMessage(msg, size, promise);
         }
 

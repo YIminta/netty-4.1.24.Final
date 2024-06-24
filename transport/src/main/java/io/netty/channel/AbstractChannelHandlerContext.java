@@ -760,20 +760,25 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
 
     @Override
     public ChannelFuture write(final Object msg, final ChannelPromise promise) {
+        // 消息( 数据 )为空，抛出异常
         if (msg == null) {
             throw new NullPointerException("msg");
         }
 
         try {
+            // 判断是否为合法的 Promise 对象
             if (isNotValidPromise(promise, true)) {
+                // 释放消息( 数据 )相关的资源
                 ReferenceCountUtil.release(msg);
                 // cancelled
                 return promise;
             }
         } catch (RuntimeException e) {
+            // 发生异常，释放消息( 数据 )相关的资源
             ReferenceCountUtil.release(msg);
             throw e;
         }
+        // 写入消息( 数据 )到内存队列
         write(msg, false, promise);
 
         return promise;
@@ -860,22 +865,30 @@ abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
     }
 
     private void write(Object msg, boolean flush, ChannelPromise promise) {
+        // 获得下一个 Outbound 节点
         AbstractChannelHandlerContext next = findContextOutbound();
+        // 记录 Record 记录
         final Object m = pipeline.touch(msg, next);
         EventExecutor executor = next.executor();
+        // 在 EventLoop 的线程中
         if (executor.inEventLoop()) {
+            // 执行 writeAndFlush 事件到下一个节点
             if (flush) {
                 next.invokeWriteAndFlush(m, promise);
             } else {
+                // 执行 write 事件到下一个节点
                 next.invokeWrite(m, promise);
             }
         } else {
+            // 创建 writeAndFlush 任务
             AbstractWriteTask task;
             if (flush) {
                 task = WriteAndFlushTask.newInstance(next, m, promise);
             }  else {
+                // 创建 write 任务
                 task = WriteTask.newInstance(next, m, promise);
             }
+            // 提交到 EventLoop 的线程中，执行该任务
             safeExecute(executor, task, promise, m);
         }
     }
