@@ -442,6 +442,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
          */
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
         private RecvByteBufAllocator.Handle recvHandle;
+        /**
+         * 是否正在 flush 中，即正在调用 {@link #flush0()} 中
+         */
         private boolean inFlush0;
         /**
          * 是否重未注册过，用于标记首次注册
@@ -929,30 +932,33 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         @Override
         public final void flush() {
             assertEventLoop();
-
+            // 内存队列为 null ，一般是 Channel 已经关闭，所以直接返回
             ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
             if (outboundBuffer == null) {
                 return;
             }
-
+            // 标记内存队列开始 flush
             outboundBuffer.addFlush();
+            // 执行 flush
             flush0();
         }
 
         @SuppressWarnings("deprecation")
         protected void flush0() {
+            // 正在 flush 中，所以直接返回。
             if (inFlush0) {
                 // Avoid re-entrance
                 return;
             }
-
+            // 内存队列为 null ，一般是 Channel 已经关闭，所以直接返回。
+            // 内存队列为空，无需 flush ，所以直接返回
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
             if (outboundBuffer == null || outboundBuffer.isEmpty()) {
                 return;
             }
-
+            // 标记正在 flush 中。
             inFlush0 = true;
-
+            // 若未激活，通知 flush 失败
             // Mark all pending write requests as failure if the channel is inactive.
             if (!isActive()) {
                 try {
@@ -963,11 +969,12 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         outboundBuffer.failFlushed(FLUSH0_CLOSED_CHANNEL_EXCEPTION, false);
                     }
                 } finally {
+                    // 标记不在 flush 中。
                     inFlush0 = false;
                 }
                 return;
             }
-
+            // 执行真正的写入到对端
             try {
                 doWrite(outboundBuffer);
             } catch (Throwable t) {
@@ -989,6 +996,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     }
                 }
             } finally {
+                // 标记不在 flush 中。
                 inFlush0 = false;
             }
         }

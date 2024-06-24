@@ -310,9 +310,10 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
     protected final void incompleteWrite(boolean setOpWrite) {
         // Did not write completely.
+        // true ，注册对 SelectionKey.OP_WRITE 事件感兴趣
         if (setOpWrite) {
             setOpWrite();
-        } else {
+        } else { // false ，取消对 SelectionKey.OP_WRITE 事件感兴趣
             // It is possible that we have set the write OP, woken up by NIO because the socket is writable, and then
             // use our write quantum. In this case we no longer want to set the write OP because the socket is still
             // writable (as far as we know). We will find out next time we attempt to write if the socket is writable
@@ -320,6 +321,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             clearOpWrite();
 
             // Schedule flush again later so other tasks can be picked up in the meantime
+            // 立即发起下一次 flush 任务
             eventLoop().execute(flushTask);
         }
     }
@@ -349,10 +351,11 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
         // Check first if the key is still valid as it may be canceled as part of the deregistration
         // from the EventLoop
         // See https://github.com/netty/netty/issues/2104
-        if (!key.isValid()) {
+        if (!key.isValid()) { // 合法
             return;
         }
         final int interestOps = key.interestOps();
+        // 注册 SelectionKey.OP_WRITE 事件的感兴趣
         if ((interestOps & SelectionKey.OP_WRITE) == 0) {
             key.interestOps(interestOps | SelectionKey.OP_WRITE);
         }
@@ -363,10 +366,11 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
         // Check first if the key is still valid as it may be canceled as part of the deregistration
         // from the EventLoop
         // See https://github.com/netty/netty/issues/2104
-        if (!key.isValid()) {
+        if (!key.isValid()) { // 合法
             return;
         }
         final int interestOps = key.interestOps();
+        // 若注册了 SelectionKey.OP_WRITE ，则进行取消
         if ((interestOps & SelectionKey.OP_WRITE) != 0) {
             key.interestOps(interestOps & ~SelectionKey.OP_WRITE);
         }
