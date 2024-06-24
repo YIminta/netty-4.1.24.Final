@@ -115,14 +115,20 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             if (byteBuf != null) {
                 if (byteBuf.isReadable()) {
                     readPending = false;
+                    // 触发 Channel read 事件到 pipeline 中。
                     pipeline.fireChannelRead(byteBuf);
                 } else {
+                    // 释放 ByteBuf 对象
                     byteBuf.release();
                 }
             }
+            // 读取完成
             allocHandle.readComplete();
+            // 触发 Channel readComplete 事件到 pipeline 中。
             pipeline.fireChannelReadComplete();
+            // 触发 exceptionCaught 事件到 pipeline 中。
             pipeline.fireExceptionCaught(cause);
+            // // TODO 芋艿 细节
             if (close || cause instanceof IOException) {
                 closeOnRead(pipeline);
             }
@@ -131,6 +137,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
         @Override
         public final void read() {
             final ChannelConfig config = config();
+            // 若 inputClosedSeenErrorOnRead = true ，移除对 SelectionKey.OP_READ 事件的感兴趣。
             if (shouldBreakReadReady(config)) {
                 clearReadPending();
                 return;
@@ -138,39 +145,51 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             final ChannelPipeline pipeline = pipeline();
             // 创建ByteBuf分配器
             final ByteBufAllocator allocator = config.getAllocator();
+            // 获得 RecvByteBufAllocator.Handle 对象
             final RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
-            allocHandle.reset(config);
+            // 重置 RecvByteBufAllocator.Handle 对象
+            allocHandle.reset(config); // 是否关闭连接
 
             ByteBuf byteBuf = null;
             boolean close = false;
             try {
                 do {
-                    // 分配一个ByteBuf
+                    // 申请 ByteBuf 对象
                     byteBuf = allocHandle.allocate(allocator);
-                    // 将数据读取到分配的ByteBuf中去
+                    // 读取数据
+                    // 将数据读取到分配的ByteBuf中去 // 设置最后读取字节数
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
+                    // <1> 未读取到数据
                     if (allocHandle.lastBytesRead() <= 0) {
+                        // 释放 ByteBuf 对象
                         // nothing was read. release the buffer.
                         byteBuf.release();
+                        // 置空 ByteBuf 对象
                         byteBuf = null;
+                        // 如果最后读取的字节为小于 0 ，说明对端已经关闭
                         close = allocHandle.lastBytesRead() < 0;
                         if (close) {
                             // There is nothing left to read as we received an EOF.
                             readPending = false;
                         }
+                        // 结束循环
                         break;
                     }
-
+                    // <2> 读取到数据
+                    // 读取消息数量 + localRead
                     allocHandle.incMessagesRead(1);
                     readPending = false;
                     // 触发事件，将会引发pipeline的读事件传播
+                    // 触发 Channel read 事件到 pipeline 中
                     pipeline.fireChannelRead(byteBuf);
+                    // 置空 ByteBuf 对象
                     byteBuf = null;
-                } while (allocHandle.continueReading());
-
+                } while (allocHandle.continueReading()); // 循环判断是否继续读取
+                // 读取完成
                 allocHandle.readComplete();
+                // 触发 Channel readComplete 事件到 pipeline 中。
                 pipeline.fireChannelReadComplete();
-
+                // 关闭客户端的连接
                 if (close) {
                     closeOnRead(pipeline);
                 }
