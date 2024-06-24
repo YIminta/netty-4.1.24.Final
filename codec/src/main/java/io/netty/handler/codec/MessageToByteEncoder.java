@@ -99,24 +99,33 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         ByteBuf buf = null;
         try {
+            // 判断当前Handelr是否能处理写入的消息
             if (acceptOutboundMessage(msg)) {
                 @SuppressWarnings("unchecked")
+                // 强制换换
                 I cast = (I) msg;
+                // 分配一段ButeBuf
                 buf = allocateBuffer(ctx, cast, preferDirect);
                 try {
+                    // 调用encode，这里就调回到  `Encoder` 这个Handelr中
                     encode(ctx, cast, buf);
                 } finally {
+                    // 既然自定义java对象转换成ByteBuf了，那么这个对象就已经无用了，释放掉
+                    // (当传入的msg类型是ByteBuf的时候，就不需要自己手动释放了)
                     ReferenceCountUtil.release(cast);
                 }
 
+                // 如果buf中写入了数据，就把buf传到下一个节点
                 if (buf.isReadable()) {
                     ctx.write(buf, promise);
                 } else {
+                    // 否则，释放buf，将空数据传到下一个节点
                     buf.release();
                     ctx.write(Unpooled.EMPTY_BUFFER, promise);
                 }
                 buf = null;
             } else {
+                // 如果当前节点不能处理传入的对象，直接扔给下一个节点处理
                 ctx.write(msg, promise);
             }
         } catch (EncoderException e) {
@@ -124,6 +133,7 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
         } catch (Throwable e) {
             throw new EncoderException(e);
         } finally {
+            // 当buf在pipeline中处理完之后，释放
             if (buf != null) {
                 buf.release();
             }
