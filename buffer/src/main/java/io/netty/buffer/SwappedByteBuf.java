@@ -35,8 +35,13 @@ import java.nio.charset.Charset;
  */
 @Deprecated
 public class SwappedByteBuf extends ByteBuf {
-
+    /**
+     * 原 ByteBuf 对象
+     */
     private final ByteBuf buf;
+    /**
+     * 字节序
+     */
     private final ByteOrder order;
 
     public SwappedByteBuf(ByteBuf buf) {
@@ -44,6 +49,7 @@ public class SwappedByteBuf extends ByteBuf {
             throw new NullPointerException("buf");
         }
         this.buf = buf;
+        // 初始化 order 属性
         if (buf.order() == ByteOrder.BIG_ENDIAN) {
             order = ByteOrder.LITTLE_ENDIAN;
         } else {

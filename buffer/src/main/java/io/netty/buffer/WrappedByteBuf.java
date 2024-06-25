@@ -37,7 +37,9 @@ import java.nio.charset.Charset;
  * and {@link ByteBufUtil#writeUtf8(ByteBuf, CharSequence)}.
  */
 class WrappedByteBuf extends ByteBuf {
-
+    /**
+     * 被装饰的 ByteBuf 对象
+     */
     protected final ByteBuf buf;
 
     protected WrappedByteBuf(ByteBuf buf) {
