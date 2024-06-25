@@ -261,7 +261,9 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
     private void shutdownInput0(final ChannelPromise promise) {
         try {
+            // 关闭 Channel 数据的读取
             shutdownInput0();
+            // 通知 Promise 成功
             promise.setSuccess();
         } catch (Throwable t) {
             promise.setFailure(t);
@@ -269,6 +271,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
 
     private void shutdownInput0() throws Exception {
+        // 调用 Java NIO Channel 的 shutdownInput 方法
         if (PlatformDependent.javaVersion() >= 7) {
             javaChannel().shutdownInput();
         } else {
@@ -340,7 +343,9 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
     @Override
     protected void doClose() throws Exception {
+        // 执行父类关闭方法
         super.doClose();
+        // 执行 Java 原生 NIO SocketChannel 关闭
         javaChannel().close();
     }
 
