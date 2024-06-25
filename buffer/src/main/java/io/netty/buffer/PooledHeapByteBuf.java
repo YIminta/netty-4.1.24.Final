@@ -277,8 +277,11 @@ class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     public final ByteBuf copy(int index, int length) {
+        // 校验索引
         checkIndex(index, length);
+        // 创建一个 Heap ByteBuf 对象
         ByteBuf copy = alloc().heapBuffer(length, maxCapacity());
+        // 写入数据
         copy.writeBytes(memory, idx(index), length);
         return copy;
     }
@@ -296,8 +299,11 @@ class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public final ByteBuffer nioBuffer(int index, int length) {
         checkIndex(index, length);
+        // memory 中的开始位置
         index = idx(index);
+        // 创建 ByteBuffer 对象
         ByteBuffer buf =  ByteBuffer.wrap(memory, index, length);
+        // slice 创建 [position, limit] 子缓冲区
         return buf.slice();
     }
 

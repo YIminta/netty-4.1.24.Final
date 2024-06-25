@@ -41,7 +41,9 @@ final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
         buf.reuse(maxCapacity);
         return buf;
     }
-
+    /**
+     * 内存地址
+     */
     private long memoryAddress;
 
     private PooledUnsafeDirectByteBuf(Recycler.Handle<PooledUnsafeDirectByteBuf> recyclerHandle, int maxCapacity) {
@@ -51,13 +53,17 @@ final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
     @Override
     void init(PoolChunk<ByteBuffer> chunk, long handle, int offset, int length, int maxLength,
               PoolThreadCache cache) {
+        // 调用父初始化方法
         super.init(chunk, handle, offset, length, maxLength, cache);
+        // 初始化内存地址
         initMemoryAddress();
     }
 
     @Override
     void initUnpooled(PoolChunk<ByteBuffer> chunk, int length) {
+        // 调用父初始化方法
         super.initUnpooled(chunk, length);
+        // 初始化内存地址
         initMemoryAddress();
     }
 
