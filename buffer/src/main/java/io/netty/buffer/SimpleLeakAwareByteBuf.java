@@ -25,11 +25,15 @@ import java.nio.ByteOrder;
 class SimpleLeakAwareByteBuf extends WrappedByteBuf {
 
     /**
+     * 关联的 ByteBuf 对象
      * This object's is associated with the {@link ResourceLeakTracker}. When {@link ResourceLeakTracker#close(Object)}
      * is called this object will be used as the argument. It is also assumed that this object is used when
      * {@link ResourceLeakDetector#track(Object)} is called to create {@link #leak}.
      */
     private final ByteBuf trackedByteBuf;
+    /**
+     * ResourceLeakTracker 对象
+     */
     final ResourceLeakTracker<ByteBuf> leak;
 
     SimpleLeakAwareByteBuf(ByteBuf wrapped, ByteBuf trackedByteBuf, ResourceLeakTracker<ByteBuf> leak) {
@@ -99,7 +103,7 @@ class SimpleLeakAwareByteBuf extends WrappedByteBuf {
 
     @Override
     public boolean release() {
-        if (super.release()) {
+        if (super.release()) { // 释放完成
             closeLeak();
             return true;
         }
@@ -108,7 +112,7 @@ class SimpleLeakAwareByteBuf extends WrappedByteBuf {
 
     @Override
     public boolean release(int decrement) {
-        if (super.release(decrement)) {
+        if (super.release(decrement)) { // 释放完成
             closeLeak();
             return true;
         }
